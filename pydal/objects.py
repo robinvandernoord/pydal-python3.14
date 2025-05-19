@@ -303,8 +303,7 @@ class Table(Serializable, BasicStorage):
             or REGEX_PYTHON_KEYWORDS.match(tablename)
         ):
             raise SyntaxError(
-                "Field: invalid table name: %s, "
-                'use rname for "funny" names' % tablename
+                'Field: invalid table name: %s, use rname for "funny" names' % tablename
             )
         self._rname = args.get("rname") or db and db._adapter.dialect.quote(tablename)
         self._raw_rname = args.get("rname") or db and tablename
@@ -538,9 +537,11 @@ class Table(Serializable, BasicStorage):
         )
 
         self._before_update.append(
-            lambda qset, fs, db=archive_db, an=archive_name, cn=current_record: archive_record(
-                qset, fs, db[an], cn
-            )
+            lambda qset,
+            fs,
+            db=archive_db,
+            an=archive_name,
+            cn=current_record: archive_record(qset, fs, db[an], cn)
         )
         if is_active and is_active in fieldnames:
             self._before_delete.append(lambda qset: qset.update(is_active=False))
@@ -640,7 +641,8 @@ class Table(Serializable, BasicStorage):
                     if myfieldname not in self.fields:
                         raise SyntaxError(
                             "invalid field '%s' for referenced table '%s'"
-                            " in table '%s'" % (myfieldname, self.name, referee.table.name)
+                            " in table '%s'"
+                            % (myfieldname, self.name, referee.table.name)
                         )
                     referee.referent = self[myfieldname]
                 else:
@@ -2083,8 +2085,7 @@ class Field(Expression, Serializable):
             or REGEX_PYTHON_KEYWORDS.match(fieldname)
         ):
             raise SyntaxError(
-                "Field: invalid field name: %s, "
-                'use rname for "funny" names' % fieldname
+                'Field: invalid field name: %s, use rname for "funny" names' % fieldname
             )
 
         if not isinstance(type, (Table, Field)):
@@ -2130,6 +2131,12 @@ class Field(Expression, Serializable):
         self.custom_retrieve = custom_retrieve
         self.custom_retrieve_file_properties = custom_retrieve_file_properties
         self.custom_delete = custom_delete
+        if filter_in is None and type == "date":
+            filter_in = self._todate
+        elif filter_in is None and type == "time":
+            filter_in = self._totime
+        elif filter_in is None and type == "datetime":
+            filter_in = self._todatetime
         self.filter_in = filter_in
         self.filter_out = filter_out
         self.custom_qualifier = custom_qualifier
@@ -2143,6 +2150,30 @@ class Field(Expression, Serializable):
         self._itype = REGEX_TYPE.match(stype).group(0) if stype else None
         for key in others:
             setattr(self, key, others[key])
+
+    @staticmethod
+    def _todate(value, regex=re.compile(r"^\d\d\d\d-\d\d-\d\d$")):
+        if value is None:
+            return value
+        value = str(value)[:10]
+        assert regex.match(value), f"Invalid field value '{value}'"
+        return value
+
+    @staticmethod
+    def _totime(value, regex=re.compile(r"^\d\d:\d\d:\d\d$")):
+        if value is None:
+            return value
+        value = f"{value}:00:00"[:8]
+        assert regex.match(value), f"Invalid field value '{value}'"
+        return value
+
+    @staticmethod
+    def _todatetime(value, regex=re.compile(r"^\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d$")):
+        if value is None:
+            return value
+        value = value = f"{value}:00:00"[:19].replace("T", " ")
+        assert regex.match(value), f"Invalid field value '{value}'"
+        return value
 
     def bind(self, table):
         if self._table is not None:
@@ -3269,7 +3300,19 @@ class BasicRows(object):
                             value = field.represent(value, record)
                     row.append(none_exception(value))
                 else:
-                    row.append(record._extra[col])
+                    if ' AS ' in col:
+                        col = col.split(' AS ')[1]
+                    if '_extra' in record and col in record._extra:
+                        row.append(record._extra[col])
+                    elif col in record:                        
+                        row.append(record[col])
+                    else:
+                        for value in record.values():
+                            if insinstance(value, Row) and col in value:
+                                row.append(value[col])
+                                break
+                        else:
+                            row.append(None)
             writer.writerow(row)
 
     # for consistent naming yet backwards compatible
